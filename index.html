@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anse de panier</title>
+<style>
+  :root { --papier:#f7f1e3; --encre:#26201a; --trait:#b0342a; --cote:#2c5d8a; --gris:#8a8072; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--papier); color:var(--encre); font-family:Georgia, "DejaVu Serif", serif; }
+  header { padding:14px 16px 4px; }
+  h1 { margin:0; font-size:1.5rem; }
+  p.sous { margin:4px 0 0; color:var(--gris); font-style:italic; }
+  .reglages { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px 18px; padding:10px 16px; }
+  label { display:flex; flex-direction:column; font-size:.95rem; }
+  input[type=number] { font:inherit; font-size:1.1rem; padding:6px 8px; border:1px solid var(--gris); background:#fffdf7; border-radius:4px; width:100%; }
+  .cases { display:flex; flex-wrap:wrap; gap:6px 18px; padding:0 16px 8px; font-size:.95rem; }
+  .cases label { flex-direction:row; align-items:center; gap:6px; }
+  #dessin { padding:0 8px; }
+  #dessin svg { width:100%; height:auto; display:block; }
+  .boutons { padding:8px 16px 4px; display:flex; gap:10px; flex-wrap:wrap; }
+  button { font:inherit; padding:8px 14px; border:1px solid var(--encre); background:#fffdf7; border-radius:4px; cursor:pointer; }
+  .notes { padding:4px 16px 24px; font-size:.95rem; line-height:1.45; max-width:760px; }
+  .notes ol { padding-left:1.2em; }
+  #alerte { color:var(--trait); padding:0 16px; font-weight:bold; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Anse de panier à trois centres</h1>
+  <p class="sous">Le trait d'un porche : portée, montée, épaisseur. Cotes en millimètres.</p>
+</header>
+
+<div class="reglages">
+  <label>Portée (entre naissances)<input id="portee" type="number" value="2400" min="100" step="10"></label>
+  <label>Montée (flèche)<input id="montee" type="number" value="800" min="10" step="10"></label>
+  <label>Épaisseur de l'arc<input id="epaisseur" type="number" value="160" min="0" step="5"></label>
+</div>
+<div class="cases">
+  <label><input id="construction" type="checkbox" checked> constructions</label>
+  <label><input id="ellipse" type="checkbox"> ellipse pour comparer</label>
+  <label><input id="cotes" type="checkbox" checked> cotes</label>
+</div>
+<div id="alerte"></div>
+<div id="dessin"></div>
+<div class="boutons">
+  <button id="png">Enregistrer l'image (PNG)</button>
+  <button id="svg">Enregistrer le dessin (SVG)</button>
+</div>
+
+<div class="notes">
+  <strong>Le tracé, à la règle et au compas</strong>
+  <ol>
+    <li>Tracer la ligne des naissances AB (la portée) et son milieu O ; élever l'axe et y porter la montée OC.</li>
+    <li>Joindre A et C.</li>
+    <li>Rabattre OA sur l'axe en D (arc de centre O), puis rabattre CD sur AC en E (arc de centre C). CE = OA − OC.</li>
+    <li>La médiatrice de AE coupe la ligne des naissances en O1 et l'axe, sous la naissance, en O2. O3 est le symétrique de O1.</li>
+    <li>Arcs de centre O1 et O3 depuis les naissances, arc de centre O2 par la clé C. Ils se raccordent sur les droites O2O1 et O2O3, sans jarret.</li>
+  </ol>
+  L'extrados se trace avec les mêmes centres, rayons augmentés de l'épaisseur. Les joints de raccord sont dans le prolongement de O2O1 et O2O3.
+</div>
+
+<script id="geo">
+// Géométrie et dessin, sans dépendance : sert à la page et au rendu en PNG (bd/rendu).
+function anse(a2, b, e) {
+  const a = a2 / 2;
+  if (!(b > 0 && b < a)) return null;
+  const A = [-a, 0], C = [0, b];
+  const ac = Math.hypot(a, b);
+  const k = (a - b) / ac;                       // CE = a − b, porté de C vers A
+  const E = [C[0] + (A[0] - C[0]) * k, C[1] + (A[1] - C[1]) * k];
+  const M = [(A[0] + E[0]) / 2, (A[1] + E[1]) / 2];
+  const d = [E[0] - A[0], E[1] - A[1]];          // médiatrice : M + t·(−dy, dx)
+  const n = [-d[1], d[0]];
+  const t1 = -M[1] / n[1];                         // y = 0
+  const O1 = [M[0] + t1 * n[0], 0];
+  const t2 = -M[0] / n[0];                         // x = 0
+  const O2 = [0, M[1] + t2 * n[1]];
+  const r1 = O1[0] + a, r2 = b - O2[1];
+  const u = [O1[0] - O2[0], O1[1] - O2[1]], lu = Math.hypot(u[0], u[1]);
+  const T = [O2[0] + u[0] / lu * r2, O2[1] + u[1] / lu * r2];   // raccord à gauche
+  return { a, b, e, A, B: [a, 0], C, E, M, O1, O2, O3: [-O1[0], 0], r1, r2, T, T2: [-T[0], T[1]], D: [0, a] };
+}
+
+function dessin(p, opts) {
+  const g = anse(p.portee, p.montee, p.epaisseur);
+  if (!g) return null;
+  const { a, b, e } = g;
+  const marge = Math.max(a * 0.18, 120);
+  const bas = Math.min(g.O2[1], -0.15 * a) - marge * 1.5;
+  const haut = Math.max(b + e, opts.construction ? a : 0) + marge * 1.9;
+  const x0 = -a - e - marge, x1 = a + e + marge * 3.2;
+  const W = x1 - x0, H = haut - bas;
+  const S = (x, y) => `${(x - x0).toFixed(1)},${(haut - y).toFixed(1)}`;
+  const sx = x => (x - x0).toFixed(1), sy = y => (haut - y).toFixed(1);
+  const lw = W / 900;                                // épaisseur de trait relative
+  const enc = "#26201a", rouge = "#b0342a", bleu = "#2c5d8a", gris = "#8a8072";
+  const out = [];
+  const L = (P, Q, c, w, dash) => out.push(`<line x1="${sx(P[0])}" y1="${sy(P[1])}" x2="${sx(Q[0])}" y2="${sy(Q[1])}" stroke="${c}" stroke-width="${(w * lw).toFixed(2)}"${dash ? ` stroke-dasharray="${dash.map(v => v * lw).join(" ")}"` : ""} stroke-linecap="round"/>`);
+  const arc = (P, Q, r, c, w, dash, grand = 0, sens = 1) => out.push(`<path d="M${S(...P)} A${r.toFixed(1)},${r.toFixed(1)} 0 ${grand} ${sens} ${S(...Q)}" fill="none" stroke="${c}" stroke-width="${(w * lw).toFixed(2)}"${dash ? ` stroke-dasharray="${dash.map(v => v * lw).join(" ")}"` : ""}/>`);
+  const pt = (P, nom, c, dx = 10, dy = -10) => {
+    out.push(`<circle cx="${sx(P[0])}" cy="${sy(P[1])}" r="${(3.2 * lw).toFixed(1)}" fill="${c}"/>`);
+    out.push(`<text x="${(+sx(P[0]) + dx * lw).toFixed(1)}" y="${(+sy(P[1]) + dy * lw).toFixed(1)}" font-size="${(19 * lw).toFixed(1)}" fill="${c}" font-family="Georgia, serif" font-style="italic">${nom}</text>`);
+  };
+  const txt = (x, y, s, c, taille = 18, ancre = "middle", style = "") => out.push(`<text x="${sx(x)}" y="${sy(y)}" font-size="${(taille * lw).toFixed(1)}" fill="${c}" text-anchor="${ancre}" font-family="Georgia, serif" ${style}>${s}</text>`);
+
+  // l'arc : intrados et extrados, trois arcs chacun
+  const ext = (P, O, r) => { const v = [P[0] - O[0], P[1] - O[1]], l = Math.hypot(...v); return [O[0] + v[0] / l * (r + e), O[1] + v[1] / l * (r + e)]; };
+  const Ae = [-a - e, 0], Be = [a + e, 0], Ce = [0, b + e];
+  const Te = ext(g.T, g.O1, g.r1), T2e = [-Te[0], Te[1]];
+  // surface de l'arc
+  out.push(`<path d="M${S(...g.A)} A${g.r1},${g.r1} 0 0 1 ${S(...g.T)} A${g.r2},${g.r2} 0 0 1 ${S(...g.T2)} A${g.r1},${g.r1} 0 0 1 ${S(...g.B)} L${S(...Be)} A${g.r1 + e},${g.r1 + e} 0 0 0 ${S(...T2e)} A${g.r2 + e},${g.r2 + e} 0 0 0 ${S(...Te)} A${g.r1 + e},${g.r1 + e} 0 0 0 ${S(...Ae)} Z" fill="#e8dcc0" stroke="none"/>`);
+
+  if (opts.ellipse) {
+    out.push(`<path d="M${S(-a, 0)} A${a},${b} 0 0 1 ${S(a, 0)}" fill="none" stroke="${gris}" stroke-width="${(1.4 * lw).toFixed(2)}" stroke-dasharray="${8 * lw} ${6 * lw}"/>`);
+  }
+  if (opts.construction) {
+    L(g.A, g.C, rouge, 1.2);
+    arc(g.A, g.D, a, rouge, 1, [6, 5]);                            // OA rabattu en D
+    const cd = g.D[1] - b;
+    arc(g.D, g.E, cd, rouge, 1, [6, 5], 0, 0);                     // CD rabattu en E
+    // médiatrice de AE, prolongée jusqu'à O2
+    const far = [g.O2[0] + (g.O2[0] - g.O1[0]) * 0.0, g.O2[1]];
+    L(g.M, g.O2, rouge, 1.2, [10, 6]);
+    L(g.M, [g.M[0] + (g.M[0] - g.O2[0]) * 0.25, g.M[1] + (g.M[1] - g.O2[1]) * 0.25], rouge, 1.2, [10, 6]);
+    // rayons de raccord, prolongés jusqu'à l'extrados
+    L(g.O2, Te, rouge, 1, [3, 4]);
+    L(g.O2, T2e, rouge, 1, [3, 4]);
+    pt(g.E, "E", rouge); pt(g.D, "D", rouge, 10, 4); pt(g.M, "", rouge);
+    pt(g.O1, "O1", rouge, 6, 24); pt(g.O3, "O3", rouge, -34, 24); pt(g.O2, "O2", rouge, 10, 6);
+  }
+  // axe et ligne des naissances
+  L([0, Math.min(g.O2[1], 0) - marge * 0.3], [0, b + e + marge * 0.4], gris, 0.8, [14, 5, 3, 5]);
+  L([-a - e - marge * 0.6, 0], [a + e + marge * 0.6, 0], enc, 1.4);
+  // intrados et extrados
+  arc(g.A, g.T, g.r1, enc, 3.2); arc(g.T, g.T2, g.r2, enc, 3.2); arc(g.T2, g.B, g.r1, enc, 3.2);
+  if (e > 0) {
+    arc(Ae, Te, g.r1 + e, enc, 3.2); arc(Te, T2e, g.r2 + e, enc, 3.2); arc(T2e, Be, g.r1 + e, enc, 3.2);
+    L(g.A, Ae, enc, 2.4); L(g.B, Be, enc, 2.4);
+    L(g.T, Te, enc, 2); L(g.T2, T2e, enc, 2);                     // joints de raccord
+  }
+  pt(g.A, "A", enc, -26, 26); pt(g.B, "B", enc, 8, 26); pt(g.C, "C", enc, 8, -10); pt([0, 0], "O", enc, 8, 24);
+
+  if (opts.cotes) {
+    const yc = Math.min(g.O2[1], 0) - marge * 0.9;
+    const fl = (x, y, dir) => out.push(`<path d="M${S(x, y)} l${(dir * 12 * lw).toFixed(1)},${(-4 * lw).toFixed(1)} l0,${(8 * lw).toFixed(1)} z" fill="${bleu}"/>`);
+    L([-a, yc], [a, yc], bleu, 1); fl(-a, yc, 1); fl(a, yc, -1);
+    L([-a, 0], [-a, yc - 10], bleu, 0.6, [3, 3]); L([a, 0], [a, yc - 10], bleu, 0.6, [3, 3]);
+    txt(0, yc + 0.012 * W, `portée ${Math.round(2 * a)}`, bleu, 20);
+    const xm = a + e + marge * 0.35;
+    L([xm, 0], [xm, b], bleu, 1);
+    L([0, b], [xm + 10, b], bleu, 0.6, [3, 3]);
+    txt(xm + 0.012 * W, b / 2, `montée ${Math.round(b)}`, bleu, 20, "start");
+    txt(g.O1[0] / 2, -0.035 * W, `R1 = ${Math.round(g.r1)}`, bleu, 18);
+    txt(-g.O1[0] / 2, -0.065 * W, `O1O3 = ${Math.round(-2 * g.O1[0])}`, bleu, 16);
+    txt(0.07 * W, g.O2[1] + 0.005 * W, `R2 = ${Math.round(g.r2)} · O2 à ${Math.round(-g.O2[1])} sous les naissances`, bleu, 18, "start");
+  }
+  txt(x0 + 0.03 * W, haut - 0.035 * W, `Anse de panier à trois centres`, enc, 24, "start", 'font-weight="bold"');
+  txt(x0 + 0.03 * W, haut - 0.065 * W, `portée ${Math.round(2 * a)} · montée ${Math.round(b)} · épaisseur ${Math.round(e)} (mm)`, gris, 17, "start", 'font-style="italic"');
+  txt(x1 - 0.03 * W, bas + 0.015 * W, `Daniel Requejo, menuisier charpentier`, gris, 15, "end", 'font-style="italic"');
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W.toFixed(0)} ${H.toFixed(0)}" width="${W.toFixed(0)}" height="${H.toFixed(0)}"><rect width="100%" height="100%" fill="#f7f1e3"/>${out.join("")}</svg>`;
+}
+if (typeof module !== "undefined") module.exports = { anse, dessin };
+</script>
+
+<script>
+const $ = id => document.getElementById(id);
+function lire() {
+  return { portee: +$("portee").value, montee: +$("montee").value, epaisseur: +$("epaisseur").value };
+}
+function opts() { return { construction: $("construction").checked, ellipse: $("ellipse").checked, cotes: $("cotes").checked }; }
+function maj() {
+  const p = lire();
+  const s = dessin(p, opts());
+  $("alerte").textContent = s ? "" : "La montée doit être plus petite que la moitié de la portée (sinon c'est un plein cintre ou un arc surhaussé).";
+  if (s) $("dessin").innerHTML = s;
+  try { localStorage.setItem("anse", JSON.stringify(p)); } catch (e) {}
+}
+try { const p = JSON.parse(localStorage.getItem("anse")); if (p) { $("portee").value = p.portee; $("montee").value = p.montee; $("epaisseur").value = p.epaisseur; } } catch (e) {}
+document.querySelectorAll("input").forEach(i => i.addEventListener("input", maj));
+function telecharger(nom, url) { const l = document.createElement("a"); l.href = url; l.download = nom; l.click(); }
+$("svg").onclick = () => {
+  const s = dessin(lire(), opts());
+  telecharger("anse-de-panier.svg", URL.createObjectURL(new Blob([s], { type: "image/svg+xml" })));
+};
+$("png").onclick = () => {
+  const s = dessin(lire(), opts());
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement("canvas"); c.width = 2000; c.height = Math.round(2000 * img.height / img.width);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    telecharger("anse-de-panier.png", c.toDataURL("image/png"));
+  };
+  img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(s);
+};
+maj();
+</script>
+</body>
+</html>
